@@ -2,14 +2,12 @@
 // @name         (小说漫画)网页自动滚动+跳转
 // @author       bluesatan
 // @namespace    https://github.com/bluesatan0-0/WebpageAutoScrollNext
-// @version      1.8
-// @description  网页自动滚动，1~100速度可调，各网站速度独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。支持手动指定跳转按钮。支持空格键切换滚动。
+// @version      2.0
+// @description  网页自动滚动，1~100速度可调，各网站速度独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。支持手动指定跳转按钮。支持空格键切换滚动。v2.0：提前视口内触发跳转、悬浮面板半透明不遮挡内容、优化下一页探测性能、增强规则解析鲁棒性、加固跳转安全性。
 // @match        *://*/*
 // @grant        none
 // @date         2026.08.10
 // @license	 MIT license
-// @downloadURL https://update.greasyfork.org/scripts/590642/%28%E5%B0%8F%E8%AF%B4%E6%BC%AB%E7%94%BB%29%E7%BD%91%E9%A1%B5%E8%87%AA%E5%8A%A8%E6%BB%9A%E5%8A%A8%2B%E8%B7%B3%E8%BD%AC.user.js
-// @updateURL https://update.greasyfork.org/scripts/590642/%28%E5%B0%8F%E8%AF%B4%E6%BC%AB%E7%94%BB%29%E7%BD%91%E9%A1%B5%E8%87%AA%E5%8A%A8%E6%BB%9A%E5%8A%A8%2B%E8%B7%B3%E8%BD%AC.meta.js
 
 // ==/UserScript==
 (function () {
@@ -38,8 +36,10 @@
   const SCROLL_STATE_KEY = 'autoScrollState_v1';
   const DELAY_STORAGE_KEY = 'autoScrollDelay_v1';
   const CONFIG_PANEL_WIDTH = 340;
+  const VIEWPORT_BOTTOM_THRESHOLD = 0.30; // 下一页按钮进入视口底部30%区域即触发跳转
 
   let triggeredNextPage = false;
+  let cachedNextPageBtn = null; // v2.0：缓存下一页按钮，避免每帧全量扫描
   let configVisible = false;
   let mouseOnConfigPanel = false;
   let nextPageDelayTimer = null;
@@ -48,6 +48,7 @@
   const DEFAULT_RULES = `# 可选：为特定网站自定义下一页按钮选择器
 # 格式：域名模式|CSS选择器|文本关键词
 # 当自动检测不准时，可在此指定精确选择器
+# 若选择器或关键词中包含 | 字符，请使用反斜杠转义：\|
 # 示例（请根据实际网站修改）：
 # *qidian.com*|a#nextChapter|下一章
 # *biquge*|.bottem2 a:nth-child(3)|
@@ -77,12 +78,12 @@
   panel.style.width = PANEL_WIDTH + 'px';
   panel.style.height = PANEL_HEIGHT + 'px';
   panel.style.zIndex = '999998';
-  panel.style.background = 'rgba(28, 28, 32, 0.88)';
-  panel.style.backdropFilter = 'blur(16px)';
-  panel.style.WebkitBackdropFilter = 'blur(16px)';
+  panel.style.background = 'rgba(28, 28, 32, 0.45)';
+  panel.style.backdropFilter = 'blur(8px)';
+  panel.style.WebkitBackdropFilter = 'blur(8px)';
   panel.style.borderRadius = panelSide === 'left' ? '0 16px 16px 0' : '16px 0 0 16px';
   panel.style.boxShadow = '0 8px 32px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.06)';
-  panel.style.border = '1px solid rgba(255,255,255,0.08)';
+  panel.style.border = '1px solid rgba(255,255,255,0.15)';
   panel.style.borderLeft = panelSide === 'left' ? 'none' : '1px solid rgba(255,255,255,0.08)';
   panel.style.borderRight = panelSide === 'right' ? 'none' : '1px solid rgba(255,255,255,0.08)';
   panel.style.padding = '14px 10px 12px 10px';
@@ -233,9 +234,9 @@
   configPanel.style.position = 'fixed';
   configPanel.style.zIndex = '999997';
   configPanel.style.width = CONFIG_PANEL_WIDTH + 'px';
-  configPanel.style.background = 'rgba(24, 24, 28, 0.95)';
-  configPanel.style.backdropFilter = 'blur(20px)';
-  configPanel.style.WebkitBackdropFilter = 'blur(20px)';
+  configPanel.style.background = 'rgba(24, 24, 28, 0.60)';
+  configPanel.style.backdropFilter = 'blur(10px)';
+  configPanel.style.WebkitBackdropFilter = 'blur(10px)';
   configPanel.style.borderRadius = '16px';
   configPanel.style.boxShadow = '0 12px 40px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.06)';
   configPanel.style.padding = '18px';
@@ -270,7 +271,7 @@
   configPanel.appendChild(configTitle);
 
   const configDesc = document.createElement('div');
-  configDesc.innerHTML = '当自动检测"下一页"按钮不准时，可在此指定精确选择器。<br>格式：<b style="color:#a5b4fc">域名模式|CSS选择器|文本关键词</b><br>使用 <b style="color:#a5b4fc">*</b> 作为通配符。留空表示使用自动检测。';
+  configDesc.innerHTML = '当自动检测"下一页"按钮不准时，可在此指定精确选择器。<br>格式：<b style="color:#a5b4fc">域名模式|CSS选择器|文本关键词</b><br>使用 <b style="color:#a5b4fc">*</b> 作为通配符。留空表示使用自动检测。<br>若内容中包含 <b style="color:#a5b4fc">|</b> 请用反斜杠转义：<b style="color:#a5b4fc">\|</b>';
   configDesc.style.color = 'rgba(255,255,255,0.45)';
   configDesc.style.fontSize = '12px';
   configDesc.style.lineHeight = '1.6';
@@ -430,9 +431,9 @@
   topBtn.style.width = BTN_SIZE + 'px';
   topBtn.style.height = BTN_SIZE + 'px';
   topBtn.style.borderRadius = '50%';
-  topBtn.style.background = 'rgba(28, 28, 32, 0.88)';
-  topBtn.style.backdropFilter = 'blur(12px)';
-  topBtn.style.WebkitBackdropFilter = 'blur(12px)';
+  topBtn.style.background = 'rgba(28, 28, 32, 0.55)';
+  topBtn.style.backdropFilter = 'blur(6px)';
+  topBtn.style.WebkitBackdropFilter = 'blur(6px)';
   topBtn.style.color = 'rgba(255,255,255,0.7)';
   topBtn.style.display = 'flex';
   topBtn.style.justifyContent = 'center';
@@ -442,7 +443,7 @@
   topBtn.style.cursor = 'pointer';
   topBtn.style.boxShadow = '0 4px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)';
   topBtn.style.userSelect = 'none';
-  topBtn.style.border = '1px solid rgba(255,255,255,0.08)';
+  topBtn.style.border = '1px solid rgba(255,255,255,0.15)';
   topBtn.style.transition = 'transform 0.15s, color 0.2s';
   topBtn.addEventListener('mouseenter', () => {
     topBtn.style.transform = 'scale(1.1)';
@@ -460,9 +461,9 @@
   bottomBtn.style.width = BTN_SIZE + 'px';
   bottomBtn.style.height = BTN_SIZE + 'px';
   bottomBtn.style.borderRadius = '50%';
-  bottomBtn.style.background = 'rgba(28, 28, 32, 0.88)';
-  bottomBtn.style.backdropFilter = 'blur(12px)';
-  bottomBtn.style.WebkitBackdropFilter = 'blur(12px)';
+  bottomBtn.style.background = 'rgba(28, 28, 32, 0.55)';
+  bottomBtn.style.backdropFilter = 'blur(6px)';
+  bottomBtn.style.WebkitBackdropFilter = 'blur(6px)';
   bottomBtn.style.color = 'rgba(255,255,255,0.7)';
   bottomBtn.style.display = 'flex';
   bottomBtn.style.justifyContent = 'center';
@@ -472,7 +473,7 @@
   bottomBtn.style.cursor = 'pointer';
   bottomBtn.style.boxShadow = '0 4px 14px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.06)';
   bottomBtn.style.userSelect = 'none';
-  bottomBtn.style.border = '1px solid rgba(255,255,255,0.08)';
+  bottomBtn.style.border = '1px solid rgba(255,255,255,0.15)';
   bottomBtn.style.transition = 'transform 0.15s, color 0.2s';
   bottomBtn.addEventListener('mouseenter', () => {
     bottomBtn.style.transform = 'scale(1.1)';
@@ -532,7 +533,7 @@
   miniButton.style.zIndex = '999999';
   miniButton.style.width = '32px';
   miniButton.style.height = '32px';
-  miniButton.style.background = 'linear-gradient(135deg, #6366f1, #8b5cf6)';
+  miniButton.style.background = 'linear-gradient(135deg, rgba(99,102,241,0.70), rgba(139,92,246,0.70))';
   miniButton.style.color = '#fff';
   miniButton.style.borderRadius = '50%';
   miniButton.style.display = 'none';
@@ -724,16 +725,38 @@
     return Math.round(v * 1000);
   }
 
+  // ========== v1.9：增强规则解析，支持反斜杠转义 ==========
   function parseRules(text) {
     return text.split('\n')
       .map(line => line.trim())
       .filter(line => line && !line.startsWith('#'))
       .map(line => {
-        const parts = line.split('|');
+        const parts = [];
+        let current = '';
+        let escaped = false;
+        for (let i = 0; i < line.length; i++) {
+          const ch = line[i];
+          if (escaped) {
+            current += ch;
+            escaped = false;
+            continue;
+          }
+          if (ch === '\\') {
+            escaped = true;
+            continue;
+          }
+          if (ch === '|') {
+            parts.push(current.trim());
+            current = '';
+            continue;
+          }
+          current += ch;
+        }
+        parts.push(current.trim());
         return {
-          pattern: (parts[0] || '').trim(),
-          selector: (parts[1] || '').trim(),
-          keyword: (parts[2] || '').trim()
+          pattern: parts[0] || '',
+          selector: parts[1] || '',
+          keyword: parts[2] || ''
         };
       });
   }
@@ -750,6 +773,7 @@
     return rect.width > 0 && rect.height > 0;
   }
 
+  // ========== v1.9：性能优化，分层扫描策略 ==========
   function findNextButtonGeneric() {
     const keywords = [
       '下一章', '下一页', 'next chapter', '下一节', '下章', '下页',
@@ -759,11 +783,65 @@
       '다음', '다음 장', '다음 화', '后一章', '后一节', '后一页'
     ];
 
-    const selector = 'a, button, [role="button"], input[type="button"], input[type="submit"], div, span, li, p, strong, b, em, i, label, td, th, h1, h2, h3, h4, h5, h6';
-    const elements = document.querySelectorAll(selector);
+    const candidateTags = 'a, button, [role="button"], input[type="button"], input[type="submit"], div, span, li, p, strong, b, em, i, label, td, th, h1, h2, h3, h4, h5, h6';
+    const semanticContainers = [
+      'nav', 'article', 'main', 'footer',
+      '[class*="page"]', '[class*="chapter"]', '[class*="nav"]', '[class*="control"]',
+      '[id*="page"]', '[id*="chapter"]', '[id*="nav"]'
+    ];
+
+    let elements = [];
+    const seen = new Set();
+
+    // 第一层：语义容器内扫描（高精度、低数量）
+    for (const sel of semanticContainers) {
+      let containers;
+      try {
+        containers = document.querySelectorAll(sel);
+      } catch (e) { continue; }
+      for (const container of containers) {
+        try {
+          const nodes = container.querySelectorAll(candidateTags);
+          for (const node of nodes) {
+            if (!seen.has(node)) {
+              seen.add(node);
+              elements.push(node);
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    // 第二层：若语义容器候选不足，补充全文档的 <a> / <button> 等交互元素
+    const MIN_CANDIDATES = 8;
+    if (elements.length < MIN_CANDIDATES) {
+      try {
+        const fallback = document.querySelectorAll('a, button, [role="button"], input[type="button"], input[type="submit"]');
+        for (const node of fallback) {
+          if (!seen.has(node)) {
+            seen.add(node);
+            elements.push(node);
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 第三层：仍不足时，全文档扫描 div/span/p 等容器（兜底）
+    if (elements.length < MIN_CANDIDATES) {
+      try {
+        const all = document.querySelectorAll(candidateTags);
+        for (const node of all) {
+          if (!seen.has(node)) {
+            seen.add(node);
+            elements.push(node);
+          }
+        }
+      } catch (e) {}
+    }
 
     let bestMatch = null;
     let bestScore = 0;
+    const MIN_INTERACTIVE_SIZE = 20; // px，过滤无意义纯文本节点
 
     for (const el of elements) {
       const rawText = (el.innerText || el.textContent || el.value || el.title || el.getAttribute('aria-label') || '').toLowerCase();
@@ -779,6 +857,14 @@
 
       if (!matchedKeyword) continue;
       if (!isElementVisible(el)) continue;
+
+      // v1.9：对非交互容器增加尺寸过滤，避免扫描海量无意义文本节点
+      const tag = el.tagName.toLowerCase();
+      const isContainer = (tag === 'div' || tag === 'span' || tag === 'p' || tag === 'li' || tag === 'td' || tag === 'th');
+      if (isContainer) {
+        const r = el.getBoundingClientRect();
+        if (r.width < MIN_INTERACTIVE_SIZE && r.height < MIN_INTERACTIVE_SIZE) continue;
+      }
 
       let score = 100;
       if (text === matchedKeyword.toLowerCase()) score += 50;
@@ -869,6 +955,18 @@
     } catch (e) {}
   }
 
+  // ========== v1.9：安全性加固，过滤危险协议 ==========
+  function isSafeHref(href) {
+    if (!href) return false;
+    const lower = href.toLowerCase().trim();
+    if (lower === '#') return false;
+    const dangerous = ['javascript:', 'data:', 'vbscript:', 'file:'];
+    for (const protocol of dangerous) {
+      if (lower.startsWith(protocol)) return false;
+    }
+    return true;
+  }
+
   function tryAutoNextPage() {
     const nextBtn = findNextPageButton();
     if (!nextBtn) return;
@@ -885,9 +983,10 @@
 
     nextPageDelayTimer = setTimeout(() => {
       nextPageDelayTimer = null;
+      cachedNextPageBtn = null; // v2.0：跳转前清空缓存
       const href = nextBtn.getAttribute('href');
-      if (nextBtn.tagName === 'A' && href && href !== '#'
-          && !href.startsWith('javascript:') && !href.startsWith('void')) {
+      // v1.9：使用安全校验替代简单字符串判断
+      if (nextBtn.tagName === 'A' && isSafeHref(href)) {
         location.href = nextBtn.href;
       } else {
         nextBtn.click();
@@ -902,6 +1001,7 @@
     const baseSpeed = Math.pow(speed / 20, 1.6);
     scrolling = true;
     triggeredNextPage = false;
+    cachedNextPageBtn = null; // v2.0：滚动开始时清空缓存
     if (nextPageDelayTimer) {
       clearTimeout(nextPageDelayTimer);
       nextPageDelayTimer = null;
@@ -930,7 +1030,23 @@
         const currentScroll = window.scrollY;
         const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
 
-        if (currentScroll >= maxScroll) {
+        // v2.0：当下一页按钮进入视口底部阈值区域时提前触发跳转
+        // 避免用户被迫滚动完底部广告/推荐等非正文内容
+        if (!cachedNextPageBtn || !document.body.contains(cachedNextPageBtn) || !isElementVisible(cachedNextPageBtn)) {
+          cachedNextPageBtn = findNextPageButton();
+        }
+        if (cachedNextPageBtn) {
+          const btnRect = cachedNextPageBtn.getBoundingClientRect();
+          const thresholdY = window.innerHeight * (1 - VIEWPORT_BOTTOM_THRESHOLD);
+          if (btnRect.top >= 0 && btnRect.top <= thresholdY && btnRect.bottom <= window.innerHeight + 50) {
+            stopScroll();
+            tryAutoNextPage();
+            return;
+          }
+        }
+
+        // v1.9：增加 2px 容差，避免缩放/小数像素导致无法触发
+        if (currentScroll >= maxScroll - 2) {
           stopScroll();
           tryAutoNextPage();
           return;
@@ -947,6 +1063,7 @@
 
   function stopScroll() {
     scrolling = false;
+    cachedNextPageBtn = null; // v2.0：停止时清空缓存
     if (scrollRAF) {
       cancelAnimationFrame(scrollRAF);
       scrollRAF = null;
