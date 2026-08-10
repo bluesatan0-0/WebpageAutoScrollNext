@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         (小说漫画)网页自动滚动+跳转
 // @author       bluesatan
-// @version      1.7
-// @description  网页自动滚动，1~100速度可调，各网站速度独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。支持自动跳转下一章。支持自定义跳转延迟。支持手动指定跳转按钮。支持空格键启停滚动。支持速度编辑框enter键开启滚动。
+// @version      1.8
+// @description  网页自动滚动，1~100速度可调，各网站速度与跳转延迟独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。支持自动跳转下一章。支持自定义跳转延迟。支持手动指定跳转按钮。支持空格键启停滚动。支持速度编辑框enter键开启滚动。出现跳转按钮停止滚动(避免非正文内容)
 // @match        *://*/*
 // @grant        none
 // @date         2026.08.10
@@ -33,7 +33,6 @@
 
   const CONFIG_STORAGE_KEY = 'autoScrollConfig_v1';
   const SCROLL_STATE_KEY = 'autoScrollState_v1';
-  const DELAY_STORAGE_KEY = 'autoScrollDelay_v1';
   const CONFIG_PANEL_WIDTH = 340;
 
   let triggeredNextPage = false;
@@ -41,7 +40,6 @@
   let mouseOnConfigPanel = false;
   let nextPageDelayTimer = null;
 
-  // ========== 配置改为"自定义选择器"，不再作为白名单 ==========
   const DEFAULT_RULES = `# 可选：为特定网站自定义下一页按钮选择器
 # 格式：域名模式|CSS选择器|文本关键词
 # 当自动检测不准时，可在此指定精确选择器
@@ -50,8 +48,12 @@
 # *biquge*|.bottem2 a:nth-child(3)|
 `;
 
+  // ========== 速度和延迟均按域名独立存储 ==========
   function getSpeedStorageKey() {
     return 'autoScrollSpeed_site_' + location.hostname;
+  }
+  function getDelayStorageKey() {
+    return 'autoScrollDelay_site_' + location.hostname;
   }
 
   let savedPos = null;
@@ -316,9 +318,10 @@
   delayInput.min = '0';
   delayInput.max = '10';
   delayInput.step = '0.5';
+  // ========== 按域名读取延迟 ==========
   let savedDelay = 2;
   try {
-    const stored = localStorage.getItem(DELAY_STORAGE_KEY);
+    const stored = localStorage.getItem(getDelayStorageKey());
     if (stored !== null) {
       const parsed = parseFloat(stored);
       if (!isNaN(parsed) && parsed >= 0 && parsed <= 10) savedDelay = parsed;
@@ -354,8 +357,9 @@
     if (v > 10) v = 10;
     v = Math.round(v * 2) / 2;
     delayInput.value = String(v);
+    // ========== 按域名保存延迟 ==========
     try {
-      localStorage.setItem(DELAY_STORAGE_KEY, String(v));
+      localStorage.setItem(getDelayStorageKey(), String(v));
     } catch (e) {}
   });
 
@@ -697,7 +701,7 @@
 
   function loadDelay() {
     try {
-      const saved = localStorage.getItem(DELAY_STORAGE_KEY);
+      const saved = localStorage.getItem(getDelayStorageKey());
       if (saved !== null) {
         const v = parseFloat(saved);
         if (!isNaN(v) && v >= 0 && v <= 10) {
@@ -711,7 +715,7 @@
 
   function saveDelay() {
     try {
-      localStorage.setItem(DELAY_STORAGE_KEY, delayInput.value);
+      localStorage.setItem(getDelayStorageKey(), delayInput.value);
     } catch (e) {}
   }
 
@@ -813,12 +817,10 @@
     return bestMatch;
   }
 
-  // ========== 查找下一页：优先使用自定义选择器，否则自动检测 ==========
   function findNextPageButton() {
     const rules = parseRules(configTextarea.value);
     const hostname = location.hostname.toLowerCase();
 
-    // 查找匹配当前域名的规则
     const matchedRule = rules.find(rule => {
       if (!rule.pattern) return false;
       const pattern = rule.pattern.replace(/\*/g, '.*');
@@ -830,7 +832,6 @@
       }
     });
 
-    // 如果匹配到规则且提供了选择器，优先使用
     if (matchedRule && matchedRule.selector) {
       const btn = document.querySelector(matchedRule.selector);
       if (btn && isElementVisible(btn)) {
@@ -842,7 +843,6 @@
       }
     }
 
-    // 否则使用通用自动检测
     return findNextButtonGeneric();
   }
 
@@ -924,13 +924,29 @@
       scrollAccumulated -= scrollNow;
 
       if (scrollNow > 0) {
-        const currentScroll = window.scrollY;
-        const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+        // ========== 【核心改动】检测到下一页按钮进入视口底部区域即停止 ==========
+        if (!triggeredNextPage) {
+          const nextBtn = findNextPageButton();
+          if (nextBtn) {
+            const rect = nextBtn.getBoundingClientRect();
+            const viewportH = window.innerHeight;
+            // 按钮已进入视口，或在视口下方 300px 范围内（即将进入）
+            if (rect.top < viewportH + 300 && rect.bottom > 0) {
+              triggeredNextPage = true;
+              stopScroll();
+              tryAutoNextPage();
+              return;
+            }
+          }
 
-        if (currentScroll >= maxScroll) {
-          stopScroll();
-          tryAutoNextPage();
-          return;
+          // 兜底：滚到页面最底部也停止
+          const currentScroll = window.scrollY;
+          const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+          if (currentScroll >= maxScroll) {
+            stopScroll();
+            tryAutoNextPage();
+            return;
+          }
         }
 
         window.scrollBy(0, scrollNow);
@@ -953,7 +969,7 @@
       nextPageDelayTimer = null;
     }
     toggleBtn.innerHTML = '▶';
-    toggleBtn.style.background = 'linear-gradient(135deg, #6366f1, #8b5cf6)';
+    toggleBtn.style.background = 'linear-gradient(135deg, #6366f1, #b5cf6)';
     toggleBtn.style.boxShadow = '0 4px 14px rgba(99,102,241,0.45), inset 0 1px 0 rgba(255,255,255,0.2)';
   }
 
