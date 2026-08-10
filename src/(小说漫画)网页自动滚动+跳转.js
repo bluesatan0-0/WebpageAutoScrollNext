@@ -1,15 +1,13 @@
 // ==UserScript==
 // @name         (小说漫画)网页自动滚动+跳转
 // @author       bluesatan
-// @namespace    https://github.com/bluesatan0-0/WebpageAutoScrollNext
-// @version      1.6
-// @description  网页自动滚动，1~100速度可调，各网站速度独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。新增网站白名单配置与自动下一页功能。支持空格键切换滚动。
+// @version      1.7
+// @description  网页自动滚动，1~100速度可调，各网站速度独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。支持自动跳转下一章。支持自定义跳转延迟。支持手动指定跳转按钮。支持空格键启停滚动。支持速度编辑框enter键开启滚动。
 // @match        *://*/*
 // @grant        none
 // @date         2026.08.10
 // @license	 MIT license
-// @downloadURL 
-// @updateURL 
+
 // ==/UserScript==
 (function () {
   'use strict';
@@ -43,20 +41,15 @@
   let mouseOnConfigPanel = false;
   let nextPageDelayTimer = null;
 
-  const DEFAULT_RULES = `# 每行一条规则，格式：域名模式|CSS选择器|文本关键词
-# 使用 * 作为通配符，选择器留空则自动检测
-# 留空域名模式表示匹配所有网站（谨慎使用）
-*qidian.com*||
-*cyppt.com*||
-*biquge*||
-*uukanshu*||
-*69shu*||
-*xbiquge*||
-*ptwxz*||
-*book*||
+  // ========== 配置改为"自定义选择器"，不再作为白名单 ==========
+  const DEFAULT_RULES = `# 可选：为特定网站自定义下一页按钮选择器
+# 格式：域名模式|CSS选择器|文本关键词
+# 当自动检测不准时，可在此指定精确选择器
+# 示例（请根据实际网站修改）：
+# *qidian.com*|a#nextChapter|下一章
+# *biquge*|.bottem2 a:nth-child(3)|
 `;
 
-  // ========== 速度按域名独立存储 ==========
   function getSpeedStorageKey() {
     return 'autoScrollSpeed_site_' + location.hostname;
   }
@@ -115,7 +108,6 @@
   speedInput.type = 'number';
   speedInput.min = '1';
   speedInput.max = '100';
-  // ========== 读取当前域名专属速度 ==========
   let savedSpeed = 10;
   try {
     const stored = localStorage.getItem(getSpeedStorageKey());
@@ -155,7 +147,6 @@
     if (isNaN(v) || v < 1) v = 1;
     if (v > 100) v = 100;
     speedInput.value = String(v);
-    // ========== 保存到当前域名专属键 ==========
     try {
       localStorage.setItem(getSpeedStorageKey(), String(v));
     } catch (e) {}
@@ -200,7 +191,7 @@
 
   const configBtn = document.createElement('button');
   configBtn.innerHTML = '⚙';
-  configBtn.title = '配置网站规则';
+  configBtn.title = '配置自定义选择器';
   configBtn.style.position = 'absolute';
   configBtn.style.top = '6px';
   configBtn.style.right = '6px';
@@ -254,7 +245,7 @@
   configPanel.style.boxSizing = 'border-box';
 
   const configTitle = document.createElement('div');
-  configTitle.innerText = '网站规则配置';
+  configTitle.innerText = '自定义选择器配置';
   configTitle.style.fontWeight = 'bold';
   configTitle.style.fontSize = '16px';
   configTitle.style.color = '#fff';
@@ -276,7 +267,7 @@
   configPanel.appendChild(configTitle);
 
   const configDesc = document.createElement('div');
-  configDesc.innerHTML = '每行一条规则，格式：<b style="color:#a5b4fc">域名模式|CSS选择器|文本关键词</b><br>选择器和关键词可留空，使用 <b style="color:#a5b4fc">*</b> 作为通配符<br><span style="color:#fbbf24">提示：域名留空表示匹配所有网站</span>';
+  configDesc.innerHTML = '当自动检测"下一页"按钮不准时，可在此指定精确选择器。<br>格式：<b style="color:#a5b4fc">域名模式|CSS选择器|文本关键词</b><br>使用 <b style="color:#a5b4fc">*</b> 作为通配符。留空表示使用自动检测。';
   configDesc.style.color = 'rgba(255,255,255,0.45)';
   configDesc.style.fontSize = '12px';
   configDesc.style.lineHeight = '1.6';
@@ -673,7 +664,7 @@
   });
 
   resetConfigBtn.addEventListener('click', () => {
-    if (confirm('确定要恢复默认规则吗？')) {
+    if (confirm('确定要恢复默认吗？')) {
       configTextarea.value = DEFAULT_RULES;
       delayInput.value = '2';
     }
@@ -742,22 +733,6 @@
           keyword: (parts[2] || '').trim()
         };
       });
-  }
-
-  function isSiteSupported() {
-    const rules = parseRules(configTextarea.value);
-    if (rules.length === 0) return false;
-    const hostname = location.hostname.toLowerCase();
-    return rules.some(rule => {
-      if (!rule.pattern || rule.pattern === '*') return true;
-      const pattern = rule.pattern.replace(/\*/g, '.*');
-      try {
-        const regex = new RegExp(pattern, 'i');
-        return regex.test(hostname);
-      } catch (e) {
-        return hostname.includes(rule.pattern.replace(/\*/g, ''));
-      }
-    });
   }
 
   function isElementVisible(el) {
@@ -838,12 +813,14 @@
     return bestMatch;
   }
 
+  // ========== 查找下一页：优先使用自定义选择器，否则自动检测 ==========
   function findNextPageButton() {
     const rules = parseRules(configTextarea.value);
     const hostname = location.hostname.toLowerCase();
 
+    // 查找匹配当前域名的规则
     const matchedRule = rules.find(rule => {
-      if (!rule.pattern || rule.pattern === '*') return true;
+      if (!rule.pattern) return false;
       const pattern = rule.pattern.replace(/\*/g, '.*');
       try {
         const regex = new RegExp(pattern, 'i');
@@ -853,6 +830,7 @@
       }
     });
 
+    // 如果匹配到规则且提供了选择器，优先使用
     if (matchedRule && matchedRule.selector) {
       const btn = document.querySelector(matchedRule.selector);
       if (btn && isElementVisible(btn)) {
@@ -864,21 +842,21 @@
       }
     }
 
+    // 否则使用通用自动检测
     return findNextButtonGeneric();
   }
 
   function restoreScrollState() {
     try {
       const state = JSON.parse(sessionStorage.getItem(SCROLL_STATE_KEY));
-      if (state && state.scrolling && isSiteSupported()) {
+      if (state && state.scrolling) {
         if (Date.now() - state.timestamp < 5 * 60 * 1000) {
           speedInput.value = state.speed;
-          // 跨页面跳转时，把上一个页面的速度保存到当前域名
           try {
             localStorage.setItem(getSpeedStorageKey(), state.speed);
           } catch (e) {}
           setTimeout(() => {
-            if (isSiteSupported() && !scrolling) {
+            if (!scrolling) {
               startScroll();
             }
           }, 1200);
@@ -889,7 +867,6 @@
   }
 
   function tryAutoNextPage() {
-    if (!isSiteSupported()) return;
     const nextBtn = findNextPageButton();
     if (!nextBtn) return;
 
@@ -932,7 +909,6 @@
     scrollTimestamp = 0;
     scrollAccumulated = 0;
 
-    // ========== 保存到当前域名专属键 ==========
     try {
       localStorage.setItem(getSpeedStorageKey(), String(speed));
     } catch (e) {}
