@@ -2,8 +2,8 @@
 // @name         (小说漫画)网页自动滚动+跳转
 // @author       bluesatan
 // @namespace    https://github.com/bluesatan0-0/WebpageAutoScrollNext
-// @version      2.0
-// @description  网页自动滚动，1~100速度可调，各网站速度独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。支持手动指定跳转按钮。支持空格键切换滚动。v2.0：提前视口内触发跳转、悬浮面板半透明不遮挡内容、优化下一页探测性能、增强规则解析鲁棒性、加固跳转安全性。
+// @version      2.1
+// @description  网页自动滚动，1~100速度可调，各网站速度独立保存。主控面板可拖拽、吸附边沿、自动隐藏。滚动效果丝滑流畅。新增"顶/底"快速跳转按钮。支持手动指定跳转按钮。支持空格键切换滚动。v2.1：空格键快捷滚动改为悬浮面板开关、默认关闭；提前视口内触发跳转、悬浮面板半透明不遮挡内容、优化下一页探测性能、增强规则解析鲁棒性、加固跳转安全性。
 // @match        *://*/*
 // @grant        none
 // @date         2026.08.10
@@ -26,8 +26,8 @@
   let mouseOnTopBtn = false;
   let mouseOnBottomBtn = false;
 
-  const PANEL_WIDTH = 92;
-  const PANEL_HEIGHT = 130;
+  const PANEL_WIDTH = 110;
+  const PANEL_HEIGHT = 144;
   const BTN_SIZE = 38;
   const BTN_GAP = 6;
   const STORAGE_KEY = 'autoScrollPanel_v2_viewport';
@@ -35,6 +35,7 @@
   const CONFIG_STORAGE_KEY = 'autoScrollConfig_v1';
   const SCROLL_STATE_KEY = 'autoScrollState_v1';
   const DELAY_STORAGE_KEY = 'autoScrollDelay_v1';
+  const SPACEKEY_STORAGE_KEY = 'autoScrollSpaceKey_v1';
   const CONFIG_PANEL_WIDTH = 340;
   const VIEWPORT_BOTTOM_THRESHOLD = 0.30; // 下一页按钮进入视口底部30%区域即触发跳转
 
@@ -86,11 +87,8 @@
   panel.style.border = '1px solid rgba(255,255,255,0.15)';
   panel.style.borderLeft = panelSide === 'left' ? 'none' : '1px solid rgba(255,255,255,0.08)';
   panel.style.borderRight = panelSide === 'right' ? 'none' : '1px solid rgba(255,255,255,0.08)';
-  panel.style.padding = '14px 10px 12px 10px';
-  panel.style.display = 'flex';
-  panel.style.flexDirection = 'column';
-  panel.style.justifyContent = 'space-between';
-  panel.style.alignItems = 'center';
+  panel.style.padding = '34px 12px 16px 12px';
+  panel.style.display = 'block';
   panel.style.boxSizing = 'border-box';
   panel.style.cursor = 'grab';
   panel.style.opacity = '1';
@@ -100,13 +98,91 @@
   panel.style.left = panelSide === 'left' ? '0px' : (window.innerWidth - PANEL_WIDTH) + 'px';
   panel.style.top = Math.max(0, Math.min(lastYPosition, window.innerHeight - PANEL_HEIGHT)) + 'px';
 
+  // ========== v2.1：顶部 - 空格键快捷开关 ==========
+  const spaceKeyBtn = document.createElement('button');
+  spaceKeyBtn.style.display = 'flex';
+  spaceKeyBtn.style.alignItems = 'center';
+  spaceKeyBtn.style.justifyContent = 'center';
+  spaceKeyBtn.style.gap = '10px';
+  spaceKeyBtn.style.position = 'absolute';
+  spaceKeyBtn.style.top = '10px';
+  spaceKeyBtn.style.left = '14px';
+  spaceKeyBtn.style.right = 'auto';
+  spaceKeyBtn.style.height = '18px';
+  spaceKeyBtn.style.border = 'none';
+  spaceKeyBtn.style.background = 'transparent';
+  spaceKeyBtn.style.cursor = 'pointer';
+  spaceKeyBtn.style.padding = '0';
+  spaceKeyBtn.style.margin = '0 auto';
+  spaceKeyBtn.style.outline = 'none';
+  spaceKeyBtn.setAttribute('data-nodrag', 'true');
+  spaceKeyBtn.setAttribute('type', 'button');
+
+  const spaceKeyLabel = document.createElement('span');
+  spaceKeyLabel.innerText = '空格键';
+  spaceKeyLabel.style.color = 'rgba(255,255,255,0.35)';
+  spaceKeyLabel.style.fontSize = '9px';
+  spaceKeyLabel.style.fontWeight = '500';
+  spaceKeyLabel.style.letterSpacing = '0.5px';
+  spaceKeyLabel.style.pointerEvents = 'none';
+  spaceKeyLabel.style.userSelect = 'none';
+
+  const spaceKeyToggle = document.createElement('div');
+  spaceKeyToggle.style.width = '24px';
+  spaceKeyToggle.style.height = '13px';
+  spaceKeyToggle.style.borderRadius = '13px';
+  spaceKeyToggle.style.background = 'rgba(255,255,255,0.12)';
+  spaceKeyToggle.style.position = 'relative';
+  spaceKeyToggle.style.transition = 'background 0.2s ease';
+  spaceKeyToggle.style.flexShrink = '0';
+  spaceKeyToggle.style.pointerEvents = 'none';
+
+  const spaceKeyKnob = document.createElement('div');
+  spaceKeyKnob.style.width = '9px';
+  spaceKeyKnob.style.height = '9px';
+  spaceKeyKnob.style.borderRadius = '50%';
+  spaceKeyKnob.style.background = 'rgba(255,255,255,0.7)';
+  spaceKeyKnob.style.position = 'absolute';
+  spaceKeyKnob.style.top = '2px';
+  spaceKeyKnob.style.left = '2px';
+  spaceKeyKnob.style.transition = 'transform 0.2s ease, background 0.2s';
+  spaceKeyKnob.style.pointerEvents = 'none';
+
+  spaceKeyToggle.appendChild(spaceKeyKnob);
+  spaceKeyBtn.appendChild(spaceKeyLabel);
+  spaceKeyBtn.appendChild(spaceKeyToggle);
+
+  // 隐藏的状态载体 checkbox
+  const spaceKeyCheckbox = document.createElement('input');
+  spaceKeyCheckbox.type = 'checkbox';
+  spaceKeyCheckbox.style.display = 'none';
+
+  function updateSpaceKeyToggleUI() {
+    if (!spaceKeyCheckbox) return;
+    if (spaceKeyCheckbox.checked) {
+      spaceKeyToggle.style.background = '#6366f1';
+      spaceKeyKnob.style.transform = 'translateX(11px)';
+      spaceKeyKnob.style.background = '#fff';
+      spaceKeyLabel.style.color = 'rgba(165,180,252,0.85)';
+    } else {
+      spaceKeyToggle.style.background = 'rgba(255,255,255,0.12)';
+      spaceKeyKnob.style.transform = 'translateX(0)';
+      spaceKeyKnob.style.background = 'rgba(255,255,255,0.7)';
+      spaceKeyLabel.style.color = 'rgba(255,255,255,0.35)';
+    }
+  }
+
   const speedLabel = document.createElement('div');
   speedLabel.innerText = '速度';
   speedLabel.style.color = 'rgba(255,255,255,0.4)';
   speedLabel.style.fontSize = '11px';
   speedLabel.style.fontWeight = '500';
   speedLabel.style.letterSpacing = '1px';
-  speedLabel.style.marginBottom = '2px';
+  speedLabel.style.position = 'absolute';
+  speedLabel.style.top = '42px';
+  speedLabel.style.left = '14px';
+  speedLabel.style.right = 'auto';
+  speedLabel.style.textAlign = 'left';
 
   const speedInput = document.createElement('input');
   speedInput.type = 'number';
@@ -122,8 +198,12 @@
   } catch (e) {}
   speedInput.value = String(savedSpeed);
 
-  speedInput.style.width = '72px';
-  speedInput.style.height = '34px';
+  speedInput.style.position = 'absolute';
+  speedInput.style.top = '38px';
+  speedInput.style.left = '52px';
+  speedInput.style.transform = 'none';
+  speedInput.style.width = '48px';
+  speedInput.style.height = '28px';
   speedInput.style.textAlign = 'center';
   speedInput.style.fontSize = '15px';
   speedInput.style.fontWeight = 'bold';
@@ -136,6 +216,7 @@
   speedInput.style.boxShadow = 'inset 0 1px 3px rgba(0,0,0,0.2)';
   speedInput.style.transition = 'border-color 0.2s, background 0.2s';
   speedInput.style.appearance = 'none';
+  speedInput.style.WebkitAppearance = 'none';
   speedInput.style.MozAppearance = 'textfield';
 
   speedInput.addEventListener('focus', () => {
@@ -182,7 +263,10 @@
   toggleBtn.style.outline = 'none';
   toggleBtn.style.boxShadow = '0 4px 14px rgba(99,102,241,0.45), inset 0 1px 0 rgba(255,255,255,0.2)';
   toggleBtn.style.transition = 'transform 0.15s ease, box-shadow 0.2s ease';
-  toggleBtn.style.marginTop = '6px';
+  toggleBtn.style.position = 'absolute';
+  toggleBtn.style.top = '82px';
+  toggleBtn.style.left = '54px';
+  toggleBtn.style.transform = 'none';
 
   toggleBtn.addEventListener('mouseenter', () => {
     toggleBtn.style.transform = 'scale(1.08)';
@@ -197,8 +281,8 @@
   configBtn.innerHTML = '⚙';
   configBtn.title = '配置自定义选择器';
   configBtn.style.position = 'absolute';
-  configBtn.style.top = '6px';
-  configBtn.style.right = '6px';
+  configBtn.style.top = '91px';
+  configBtn.style.left = '18px';
   configBtn.style.width = '24px';
   configBtn.style.height = '24px';
   configBtn.style.border = 'none';
@@ -225,6 +309,7 @@
   });
 
   panel.appendChild(configBtn);
+  panel.appendChild(spaceKeyBtn);
   panel.appendChild(speedLabel);
   panel.appendChild(speedInput);
   panel.appendChild(toggleBtn);
@@ -271,7 +356,7 @@
   configPanel.appendChild(configTitle);
 
   const configDesc = document.createElement('div');
-  configDesc.innerHTML = '当自动检测"下一页"按钮不准时，可在此指定精确选择器。<br>格式：<b style="color:#a5b4fc">域名模式|CSS选择器|文本关键词</b><br>使用 <b style="color:#a5b4fc">*</b> 作为通配符。留空表示使用自动检测。<br>若内容中包含 <b style="color:#a5b4fc">|</b> 请用反斜杠转义：<b style="color:#a5b4fc">\|</b>';
+  configDesc.innerHTML = '当自动检测"下一页"按钮不准时，可在此指定精确选择器。<br><span style="color:rgba(255,255,255,0.3);font-size:11px">v2.1：空格键快捷滚动改为悬浮面板开关，默认关闭</span><br>格式：<b style="color:#a5b4fc">域名模式|CSS选择器|文本关键词</b><br>使用 <b style="color:#a5b4fc">*</b> 作为通配符。留空表示使用自动检测。<br>若内容中包含 <b style="color:#a5b4fc">|</b> 请用反斜杠转义：<b style="color:#a5b4fc">\|</b>';
   configDesc.style.color = 'rgba(255,255,255,0.45)';
   configDesc.style.fontSize = '12px';
   configDesc.style.lineHeight = '1.6';
@@ -719,6 +804,28 @@
     } catch (e) {}
   }
 
+  // v2.1：空格键开关存取
+  function loadSpaceKey() {
+    try {
+      const key = SPACEKEY_STORAGE_KEY + '_' + location.hostname;
+      const saved = localStorage.getItem(key);
+      if (saved !== null) {
+        spaceKeyCheckbox.checked = saved === 'true';
+        updateSpaceKeyToggleUI();
+        return;
+      }
+    } catch (e) {}
+    spaceKeyCheckbox.checked = false;
+    updateSpaceKeyToggleUI();
+  }
+
+  function saveSpaceKey() {
+    try {
+      const key = SPACEKEY_STORAGE_KEY + '_' + location.hostname;
+      localStorage.setItem(key, String(spaceKeyCheckbox.checked));
+    } catch (e) {}
+  }
+
   function getDelayMs() {
     const v = parseFloat(delayInput.value);
     if (isNaN(v) || v < 0) return 2000;
@@ -1083,11 +1190,13 @@
   });
   speedInput.addEventListener('input', resetHideTimer);
 
+  // v2.1：空格键快捷滚动由悬浮面板开关控制，默认关闭
   document.addEventListener('keydown', (e) => {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) {
       return;
     }
     if (e.code === 'Space' || e.key === ' ') {
+      if (!spaceKeyCheckbox.checked) return;
       e.preventDefault();
       if (scrolling) stopScroll(); else startScroll();
       resetHideTimer();
@@ -1097,7 +1206,8 @@
   let isDragging = false;
   let offsetX, offsetY;
   panel.addEventListener('mousedown', (e) => {
-    if (e.target !== speedInput && e.target !== toggleBtn && e.target !== configBtn) {
+    const noDrag = e.target.closest && e.target.closest('[data-nodrag="true"]');
+    if (e.target !== speedInput && e.target !== toggleBtn && e.target !== configBtn && !noDrag) {
       isDragging = true;
       const rect = panel.getBoundingClientRect();
       offsetX = e.clientX - rect.left;
@@ -1162,5 +1272,15 @@
 
   loadConfig();
   loadDelay();
+  loadSpaceKey();
+
+  spaceKeyBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    spaceKeyCheckbox.checked = !spaceKeyCheckbox.checked;
+    updateSpaceKeyToggleUI();
+    saveSpaceKey();
+    resetHideTimer();
+  });
+
   restoreScrollState();
 })();
